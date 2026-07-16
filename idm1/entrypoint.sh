@@ -11,6 +11,7 @@ KRB5_USER_DEFAULT_PASSWORD="${KRB5_USER_DEFAULT_PASSWORD:-user123}"
 
 LDAP_MARKER="/var/lib/ldap/.initialized"
 KRB5_MARKER="/var/lib/krb5kdc/.initialized"
+KRB5_DB_FILE="/var/lib/krb5kdc/principal"
 
 log() { echo "[entrypoint] $*"; }
 
@@ -59,12 +60,18 @@ cat > /etc/krb5kdc/kadm5.acl <<EOF
 */admin@${REALM} *
 EOF
 
-if [ ! -f "${KRB5_MARKER}" ]; then
+# --- Paso 1: crear la base de datos de Kerberos solo si NO existe en disco ---
+if [ ! -f "${KRB5_DB_FILE}" ]; then
     log "Inicializando base de datos de Kerberos (primera vez)..."
     kdb5_util create -s -r "${REALM}" -P "${KRB5_ADMIN_PASSWORD}"
+else
+    log "Base de datos de Kerberos ya existe en disco, se omite kdb5_util create."
+fi
 
+# --- Paso 2: crear los principals solo si NO se ha hecho antes (marcador) ---
+if [ ! -f "${KRB5_MARKER}" ]; then
     log "Creando principal de administracion admin/admin@${REALM}..."
-    kadmin.local -q "addprinc -pw ${KRB5_ADMIN_PASSWORD} admin/admin@${REALM}"
+    kadmin.local -q "addprinc -pw ${KRB5_ADMIN_PASSWORD} admin/admin@${REALM}" || true
 
     log "Creando principal de servicio para el KDC (host)..."
     kadmin.local -q "addprinc -randkey host/${FQDN}@${REALM}" || true
@@ -75,7 +82,7 @@ if [ ! -f "${KRB5_MARKER}" ]; then
     touch "${KRB5_MARKER}"
     log "Kerberos inicializado correctamente."
 else
-    log "Base de datos de Kerberos ya inicializada, se omite kdb5_util create."
+    log "Base de datos de Kerberos ya inicializada, se omiten los addprinc."
 fi
 
 if [ ! -f "${LDAP_MARKER}" ]; then
