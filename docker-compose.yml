@@ -1,0 +1,42 @@
+version: '3.8'
+
+services:
+  ca1:
+    build: ./ca
+    container_name: ca1
+    hostname: ca1
+    networks:
+      - fis-net
+    volumes:
+      - ca-data:/etc/fis-ca
+
+  idm1:
+    build: ./idm1
+    container_name: idm1
+    hostname: idm1
+    environment:
+      - LDAP_ADMIN_PASSWORD=${LDAP_ADMIN_PASSWORD}
+      - LDAP_BASE_DN=${LDAP_BASE_DN}
+      - KRB5_ADMIN_PASSWORD=${KRB5_ADMIN_PASSWORD}
+      - KRB5_USER_DEFAULT_PASSWORD=${KRB5_USER_DEFAULT_PASSWORD}
+    networks:
+      fis-net:
+        aliases:
+          - idm1.fis.epn.ec
+    volumes:
+      - idm1-ldap-data:/var/lib/ldap
+      - idm1-krb5-data:/var/lib/krb5kdc
+      - ca-data:/etc/fis-ca:ro
+      - krb5-shared:/etc/krb5kdc/shared
+    depends_on:
+      - ca1
+
+networks:
+  fis-net:
+    driver: bridge
+
+volumes:
+  ca-data:
+  idm1-ldap-data:
+  idm1-krb5-data:
+  krb5-shared:
