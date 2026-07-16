@@ -12,6 +12,7 @@ KRB5_USER_DEFAULT_PASSWORD="${KRB5_USER_DEFAULT_PASSWORD:-user123}"
 LDAP_MARKER="/var/lib/ldap/.initialized"
 KRB5_MARKER="/var/lib/krb5kdc/.initialized"
 KRB5_DB_FILE="/var/lib/krb5kdc/principal"
+LDAP_KEYTAB="/var/lib/krb5kdc/ldap.keytab"
 
 log() { echo "[entrypoint] $*"; }
 
@@ -79,6 +80,12 @@ if [ ! -f "${KRB5_MARKER}" ]; then
     log "Creando usuario de prueba testuser@${REALM}..."
     kadmin.local -q "addprinc -pw ${KRB5_USER_DEFAULT_PASSWORD} testuser@${REALM}" || true
 
+    log "Creando principal de servicio ldap/${FQDN}@${REALM} y su keytab..."
+    kadmin.local -q "addprinc -randkey ldap/${FQDN}@${REALM}" || true
+    kadmin.local -q "ktadd -k ${LDAP_KEYTAB} ldap/${FQDN}@${REALM}" || true
+    chown root:openldap "${LDAP_KEYTAB}"
+    chmod 640 "${LDAP_KEYTAB}"
+
     touch "${KRB5_MARKER}"
     log "Kerberos inicializado correctamente."
 else
@@ -110,6 +117,69 @@ EOF
     log "OpenLDAP inicializado correctamente."
 else
     log "OpenLDAP ya inicializado, se omite dpkg-reconfigure."
+fi
+
+log "Configurando cliente LDAP para confiar en la CA local..."
+if ! grep -q "^TLS_CACERT" /etc/ldap/ldap.conf 2>/dev/null; then
+    echo "TLS_CACERT /etc/fis-ca/ca.crt" >> /etc/ldap/ldap.conf
+fi
+
+# --- Configurar TLS (LDAPS) en slapd, solo la primera vez ---
+TLS_MARKER="/var/lib/ldap/.tls_configured"
+if [ ! -f "${TLS_MARKER}" ]; then
+    log "Configurando TLS en slapd..."
+
+    /usr/sbin/slapd -h "ldapi:///" -u openldap -g openldap
+    sleep 2
+
+    cat > /tmp/tls.ldif <<EOF
+dn: cn=config
+changetype: modify
+add: olcTLSCACertificateFile
+olcTLSCACertificateFile: /etc/fis-ca/ca.crt
+-
+add: olcTLSCertificateFile
+olcTLSCertificateFile: /etc/fis-ca/idm1.crt
+-
+add: olcTLSCertificateKeyFile
+olcTLSCertificateKeyFile: /etc/fis-ca/idm1.key
+EOF
+
+    ldapmodify -Y EXTERNAL -H ldapi:/// -f /tmp/tls.ldif
+
+    pkill -x slapd
+    sleep 2
+
+    touch "${TLS_MARKER}"
+    log "TLS configurado correctamente."
+else
+    log "TLS ya configurado, se omite."
+fi
+
+# --- Configurar SASL/GSSAPI en slapd, solo la primera vez ---
+SASL_MARKER="/var/lib/ldap/.sasl_configured"
+if [ ! -f "${SASL_MARKER}" ]; then
+    log "Configurando SASL (GSSAPI) en slapd..."
+
+    /usr/sbin/slapd -h "ldapi:///" -u openldap -g openldap
+    sleep 2
+
+    cat > /tmp/sasl.ldif <<EOF
+dn: cn=config
+changetype: modify
+add: olcSaslRealm
+olcSaslRealm: ${REALM}
+EOF
+
+    ldapmodify -Y EXTERNAL -H ldapi:/// -f /tmp/sasl.ldif
+
+    pkill -x slapd
+    sleep 2
+
+    touch "${SASL_MARKER}"
+    log "SASL/GSSAPI configurado correctamente."
+else
+    log "SASL/GSSAPI ya configurado, se omite."
 fi
 
 log "Arrancando supervisord..."
