@@ -17,6 +17,7 @@ RUN apt-get update && \
         ldap-utils \
         krb5-kdc \
         krb5-admin-server \
+        libsasl2-modules-gssapi-mit \
         supervisor \
         openssl \
         procps && \

@@ -26,6 +26,7 @@ cat > /etc/krb5.conf <<EOF
     renew_lifetime = 7d
     forwardable = true
     rdns = false
+    dns_canonicalize_hostname = false
 
 [realms]
     ${REALM} = {
@@ -39,6 +40,8 @@ cat > /etc/krb5.conf <<EOF
 EOF
 
 mkdir -p /etc/krb5kdc /var/lib/krb5kdc
+chgrp openldap /var/lib/krb5kdc
+chmod 750 /var/lib/krb5kdc
 cat > /etc/krb5kdc/kdc.conf <<EOF
 [kdcdefaults]
     kdc_ports = 88
@@ -83,6 +86,12 @@ if [ ! -f "${KRB5_MARKER}" ]; then
     log "Creando principal de servicio ldap/${FQDN}@${REALM} y su keytab..."
     kadmin.local -q "addprinc -randkey ldap/${FQDN}@${REALM}" || true
     kadmin.local -q "ktadd -k ${LDAP_KEYTAB} ldap/${FQDN}@${REALM}" || true
+
+    SHORT_HOST="${FQDN%%.*}"
+    log "Creando tambien ldap/${SHORT_HOST}@${REALM} (alias corto, por si el cliente canonicaliza el hostname)..."
+    kadmin.local -q "addprinc -randkey ldap/${SHORT_HOST}@${REALM}" || true
+    kadmin.local -q "ktadd -k ${LDAP_KEYTAB} ldap/${SHORT_HOST}@${REALM}" || true
+
     chown root:openldap "${LDAP_KEYTAB}"
     chmod 640 "${LDAP_KEYTAB}"
 
@@ -169,6 +178,9 @@ dn: cn=config
 changetype: modify
 add: olcSaslRealm
 olcSaslRealm: ${REALM}
+-
+add: olcSaslHost
+olcSaslHost: ${FQDN}
 EOF
 
     ldapmodify -Y EXTERNAL -H ldapi:/// -f /tmp/sasl.ldif
