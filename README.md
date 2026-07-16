@@ -17,7 +17,7 @@ mini-idm/
 ├── docker-compose.yml  # Orquestación de servicios
 ├── Makefile            # Comandos de gestión rápida
 └── README.md           # Documentación del proyecto
-
+```
 ## 2. Uso del Proyecto (Operatividad)
 
 Para gestionar la infraestructura de forma eficiente, utiliza los comandos definidos en el `Makefile` desde la raíz del proyecto:
