@@ -19,6 +19,8 @@ services:
       - LDAP_BASE_DN=${LDAP_BASE_DN}
       - KRB5_ADMIN_PASSWORD=${KRB5_ADMIN_PASSWORD}
       - KRB5_USER_DEFAULT_PASSWORD=${KRB5_USER_DEFAULT_PASSWORD}
+      - REALM=${REALM}
+      - FQDN=idm1.fis.epn.ec
     networks:
       fis-net:
         aliases:
