@@ -31,7 +31,6 @@ mini-idm/
 │   ├── test_kdc_failover.sh
 │   ├── test_loadbalancer_failover.sh
 │   └── fault_injection.sh
-├── evidencia/               # Capturas y logs de pruebas
 ├── .env                      # Variables de entorno (realm, base DN, passwords)
 ├── docker-compose.yml         # Orquestacion de todos los servicios
 ├── Makefile                    # Comandos de gestion rapida
