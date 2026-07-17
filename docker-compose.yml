@@ -4,7 +4,7 @@ services:
   ca1:
     build: ./ca
     container_name: ca1
-    hostname: ca1
+    hostname: ca1.fis.epn.ec
     networks:
       - fis-net
     volumes:
@@ -13,7 +13,9 @@ services:
   idm1:
     build: ./idm1
     container_name: idm1
-    hostname: idm1
+    # Modificado a FQDN para que Kerberos/kprop resuelvan correctamente el host
+    hostname: idm1.fis.epn.ec
+    domainname: fis.epn.ec
     environment:
       - NODE_ROLE=master
       - FQDN=idm1.fis.epn.ec
@@ -22,10 +24,15 @@ services:
       - LDAP_ADMIN_PASSWORD=${LDAP_ADMIN_PASSWORD}
       - KRB5_ADMIN_PASSWORD=${KRB5_ADMIN_PASSWORD}
       - KRB5_USER_DEFAULT_PASSWORD=${KRB5_USER_DEFAULT_PASSWORD}
+    ports:
+      - "88:88/tcp"    # KDC Kerberos Principal TCP
+      - "88:88/udp"    # KDC Kerberos Principal UDP
+      - "749:749/tcp"  # Servidor de administración de Kerberos (kadmind)
     networks:
       fis-net:
         aliases:
           - idm1.fis.epn.ec
+          - idm1
     volumes:
       - idm1-ldap-data:/var/lib/ldap
       - idm1-ldap-config:/etc/ldap/slapd.d
@@ -38,7 +45,9 @@ services:
   idm2:
     build: ./idm1
     container_name: idm2
-    hostname: idm2
+    # Modificado a FQDN para que Kerberos/kprop resuelvan correctamente el host
+    hostname: idm2.fis.epn.ec
+    domainname: fis.epn.ec
     environment:
       - NODE_ROLE=replica
       - FQDN=idm2.fis.epn.ec
@@ -47,10 +56,15 @@ services:
       - LDAP_ADMIN_PASSWORD=${LDAP_ADMIN_PASSWORD}
       - KRB5_ADMIN_PASSWORD=${KRB5_ADMIN_PASSWORD}
       - KRB5_USER_DEFAULT_PASSWORD=${KRB5_USER_DEFAULT_PASSWORD}
+    ports:
+      - "1088:88/tcp"  # KDC Kerberos Réplica TCP
+      - "1088:88/udp"  # KDC Kerberos Réplica UDP
+      - "754:754/tcp"  # kpropd Replicación de Kerberos
     networks:
       fis-net:
         aliases:
           - idm2.fis.epn.ec
+          - idm2
     volumes:
       - idm2-ldap-data:/var/lib/ldap
       - idm2-ldap-config:/etc/ldap/slapd.d

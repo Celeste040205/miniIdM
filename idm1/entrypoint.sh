@@ -18,6 +18,12 @@ SHARED_DIR="/etc/krb5kdc/shared"
 
 log() { echo "[entrypoint-${NODE_ROLE}] $*"; }
 
+# --- ASEGURAR DEFINICIÓN DEL PUERTO DE REPLICACIÓN DE KERBEROS ---
+if ! grep -q "^krb5_prop" /etc/services 2>/dev/null; then
+    log "Registrando servicio krb5_prop en /etc/services..."
+    echo "krb5_prop       754/tcp         # Kerberos slave propagation" >> /etc/services
+fi
+
 log "Escribiendo /etc/krb5.conf para el realm ${REALM}..."
 cat > /etc/krb5.conf <<EOF
 [libdefaults]
@@ -86,7 +92,8 @@ if [ "${NODE_ROLE}" = "master" ]; then
 
         log "Creando principal de servicio para el KDC (host idm1)..."
         kadmin.local -q "addprinc -randkey host/idm1.fis.epn.ec@${REALM}" || true
-        kadmin.local -q "ktadd -k /etc/krb5.keytab host/idm1.fis.epn.ec@${REALM}" || true
+        kadmin.local -q "addprinc -randkey host/idm1@${REALM}" || true
+        kadmin.local -q "ktadd -k /etc/krb5.keytab host/idm1.fis.epn.ec@${REALM} host/idm1@${REALM}" || true
 
         log "Creando usuario de prueba testuser@${REALM}..."
         kadmin.local -q "addprinc -pw ${KRB5_USER_DEFAULT_PASSWORD} testuser@${REALM}" || true
@@ -102,9 +109,12 @@ if [ "${NODE_ROLE}" = "master" ]; then
         log "Creando principals y pregenerando keytab para la réplica idm2..."
         mkdir -p "${SHARED_DIR}"
         kadmin.local -q "addprinc -randkey host/idm2.fis.epn.ec@${REALM}" || true
+        kadmin.local -q "addprinc -randkey host/idm2@${REALM}" || true
         kadmin.local -q "addprinc -randkey ldap/idm2.fis.epn.ec@${REALM}" || true
         kadmin.local -q "addprinc -randkey ldap/idm2@${REALM}" || true
-        kadmin.local -q "ktadd -k ${SHARED_DIR}/idm2.keytab host/idm2.fis.epn.ec@${REALM} ldap/idm2.fis.epn.ec@${REALM} ldap/idm2@${REALM}" || true
+        
+        # Guardamos en la carpeta compartida el keytab inicial para idm2
+        kadmin.local -q "ktadd -k ${SHARED_DIR}/idm2.keytab host/idm2.fis.epn.ec@${REALM} host/idm2@${REALM} ldap/idm2.fis.epn.ec@${REALM} ldap/idm2@${REALM}" || true
 
         chown root:openldap "${LDAP_KEYTAB}"
         chmod 640 "${LDAP_KEYTAB}"
@@ -114,6 +124,19 @@ if [ "${NODE_ROLE}" = "master" ]; then
     else
         log "Base de datos de Kerberos ya inicializada, se omiten los addprinc."
     fi
+
+    # --- SALVAGUARDA DE ENTORNO: Re-generar y exportar keytabs con -norandkey para alinear KVNOs ---
+    log "Alineando y sincronizando dinámicamente keytabs de réplica con KVNO de base de datos..."
+    mkdir -p "${SHARED_DIR}"
+    
+    # Exportamos usando -norandkey para evitar cambiar las claves en la BD y mantener el KVNO exacto
+    kadmin.local -q "ktadd -k ${SHARED_DIR}/idm2.keytab -norandkey host/idm2.fis.epn.ec@${REALM} host/idm2@${REALM} ldap/idm2.fis.epn.ec@${REALM} ldap/idm2@${REALM}" || true
+    
+    if [ ! -f "/etc/krb5.keytab" ]; then
+        log "Alerta: /etc/krb5.keytab no encontrado. Generándolo desde la base de datos de Kerberos..."
+        kadmin.local -q "ktadd -k /etc/krb5.keytab -norandkey host/idm1.fis.epn.ec@${REALM} host/idm1@${REALM}" || true
+    fi
+    chmod 600 /etc/krb5.keytab
 
 else
     # NODE_ROLE = replica
@@ -131,6 +154,7 @@ else
         log "Configurando kpropd.acl para permitir propagacion desde el Master..."
         cat > /etc/krb5kdc/kpropd.acl <<EOF
 host/idm1.fis.epn.ec@${REALM}
+host/idm1@${REALM}
 EOF
 
         # Crear una base de datos Kerberos local vacia necesaria para que kpropd arranque
@@ -138,6 +162,15 @@ EOF
 
         touch "${KRB5_MARKER}"
         log "Kerberos Replica configurado."
+    fi
+
+    # En reinicios de la réplica, asegurar que siempre tomamos la versión fresca del keytab sincronizado
+    if [ -f "${SHARED_DIR}/idm2.keytab" ]; then
+        log "Actualizando keytab de réplica desde el volumen compartido..."
+        cp "${SHARED_DIR}/idm2.keytab" /etc/krb5.keytab
+        cp "${SHARED_DIR}/idm2.keytab" "${LDAP_KEYTAB}"
+        chown root:openldap "${LDAP_KEYTAB}" /etc/krb5.keytab
+        chmod 640 "${LDAP_KEYTAB}" /etc/krb5.keytab
     fi
 fi
 
@@ -345,8 +378,6 @@ olcUpdateRef: ldaps://idm1.fis.epn.ec:636
 EOF
         ldapmodify -Y EXTERNAL -H ldapi:/// -f /tmp/syncrepl.ldif
 
-        # Tambien agregar el mapeo AuthzRegexp localmente en la replica para que
-        # resuelva las identidades GSSAPI que se autentiquen contra ella
         cat > /tmp/authz_replica.ldif <<EOF
 dn: cn=config
 changetype: modify
@@ -426,14 +457,14 @@ stderr_logfile=/dev/stderr
 stderr_logfile_maxbytes=0
 EOF
 
-    # Escribir el script de sincronizacion automatica de Kerberos
+    # Escribir el script de sincronizacion automatica de Kerberos usando bash nativo y keytab explicito
     cat > /usr/local/bin/kprop_sync.sh <<'EOF'
 #!/bin/bash
 set -euo pipefail
 log() { echo "[kprop-sync] $*"; }
 
 log "Iniciando script de propagacion Kerberos en segundo plano..."
-while ! nc -z idm2.fis.epn.ec 754 2>/dev/null; do
+while ! timeout 3 bash -c '</dev/tcp/idm2.fis.epn.ec/754' 2>/dev/null; do
     log "Esperando a que idm2 (kpropd) este listo en el puerto 754..."
     sleep 5
 done
@@ -442,8 +473,9 @@ log "idm2 listo. Iniciando propagacion periodica..."
 while true; do
     log "Realizando dump de la base de datos de Kerberos..."
     kdb5_util dump /var/lib/krb5kdc/replica_dump
-    log "Propagando base de datos a idm2.fis.epn.ec..."
-    if kprop -f /var/lib/krb5kdc/replica_dump idm2.fis.epn.ec; then
+    log "Propagando base de datos a idm2.fis.epn.ec usando keytab local..."
+    # Se añade explícitamente el keytab local de idm1 que tiene host/idm1.fis.epn.ec para que kprop se autentique correctamente contra la réplica
+    if kprop -s /etc/krb5.keytab -f /var/lib/krb5kdc/replica_dump idm2.fis.epn.ec; then
         log "Propagacion exitosa."
     else
         log "Error en la propagacion."

@@ -2,8 +2,8 @@
 
 set -euo pipefail
 
-NODE_ROLE="${NODE_ROLE:-master}"
-FQDN="${FQDN:-idm1.fis.epn.ec}"
+NODE_ROLE="${NODE_ROLE:-replica}"
+FQDN="${FQDN:-idm2.fis.epn.ec}"
 REALM="${REALM:-FIS.EPN.EC}"
 LDAP_BASE_DN="${LDAP_BASE_DN:-dc=fis,dc=epn,dc=ec}"
 LDAP_ADMIN_PASSWORD="${LDAP_ADMIN_PASSWORD:-adminpassword}"
@@ -18,6 +18,12 @@ SHARED_DIR="/etc/krb5kdc/shared"
 
 log() { echo "[entrypoint-${NODE_ROLE}] $*"; }
 
+# --- ASEGURAR DEFINICIÓN DEL PUERTO DE REPLICACIÓN DE KERBEROS ---
+if ! grep -q "^krb5_prop" /etc/services 2>/dev/null; then
+    log "Registrando servicio krb5_prop en /etc/services..."
+    echo "krb5_prop       754/tcp         # Kerberos slave propagation" >> /etc/services
+fi
+
 log "Escribiendo /etc/krb5.conf para el realm ${REALM}..."
 cat > /etc/krb5.conf <<EOF
 [libdefaults]
@@ -29,6 +35,7 @@ cat > /etc/krb5.conf <<EOF
     forwardable = true
     rdns = false
     dns_canonicalize_hostname = false
+    ignore_acceptor_hostname = true
 
 [realms]
     ${REALM} = {
@@ -86,7 +93,8 @@ if [ "${NODE_ROLE}" = "master" ]; then
 
         log "Creando principal de servicio para el KDC (host idm1)..."
         kadmin.local -q "addprinc -randkey host/idm1.fis.epn.ec@${REALM}" || true
-        kadmin.local -q "ktadd -k /etc/krb5.keytab host/idm1.fis.epn.ec@${REALM}" || true
+        kadmin.local -q "addprinc -randkey host/idm1@${REALM}" || true
+        kadmin.local -q "ktadd -k /etc/krb5.keytab host/idm1.fis.epn.ec@${REALM} host/idm1@${REALM}" || true
 
         log "Creando usuario de prueba testuser@${REALM}..."
         kadmin.local -q "addprinc -pw ${KRB5_USER_DEFAULT_PASSWORD} testuser@${REALM}" || true
@@ -102,9 +110,10 @@ if [ "${NODE_ROLE}" = "master" ]; then
         log "Creando principals y pregenerando keytab para la réplica idm2..."
         mkdir -p "${SHARED_DIR}"
         kadmin.local -q "addprinc -randkey host/idm2.fis.epn.ec@${REALM}" || true
+        kadmin.local -q "addprinc -randkey host/idm2@${REALM}" || true
         kadmin.local -q "addprinc -randkey ldap/idm2.fis.epn.ec@${REALM}" || true
         kadmin.local -q "addprinc -randkey ldap/idm2@${REALM}" || true
-        kadmin.local -q "ktadd -k ${SHARED_DIR}/idm2.keytab host/idm2.fis.epn.ec@${REALM} ldap/idm2.fis.epn.ec@${REALM} ldap/idm2@${REALM}" || true
+        kadmin.local -q "ktadd -k ${SHARED_DIR}/idm2.keytab host/idm2.fis.epn.ec@${REALM} host/idm2@${REALM} ldap/idm2.fis.epn.ec@${REALM} ldap/idm2@${REALM}" || true
 
         chown root:openldap "${LDAP_KEYTAB}"
         chmod 640 "${LDAP_KEYTAB}"
@@ -131,6 +140,7 @@ else
         log "Configurando kpropd.acl para permitir propagacion desde el Master..."
         cat > /etc/krb5kdc/kpropd.acl <<EOF
 host/idm1.fis.epn.ec@${REALM}
+host/idm1@${REALM}
 EOF
 
         # Crear una base de datos Kerberos local vacia necesaria para que kpropd arranque

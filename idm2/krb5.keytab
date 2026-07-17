@@ -1,0 +1,11 @@
+# Extraer la keytab de idm2 en idm1
+docker exec -it idm1 kadmin.local -q "ktadd -k /tmp/idm2.keytab host/idm2.fis.epn.ec@FIS.EPN.EC"
+
+# Copiar la keytab generada a tu máquina host temporalmente
+docker cp idm1:/tmp/idm2.keytab ./idm2.keytab
+
+# Mover la keytab al contenedor idm2 en su ruta de configuración de Kerberos
+docker cp ./idm2.keytab idm2:/etc/krb5.keytab
+
+# Limpiar el archivo temporal del host
+rm ./idm2.keytab
