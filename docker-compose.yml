@@ -92,9 +92,75 @@ services:
       - idm1
       - idm2
 
+  web1:
+    build: ./web
+    container_name: web1
+    hostname: webserver.fis.epn.ec
+    environment:
+      - REALM=${REALM}
+      - FQDN=webserver.fis.epn.ec
+    ports:
+      - "8443:8443"
+    networks:
+      fis-net:
+        aliases:
+          - webserver.fis.epn.ec
+          - webserver
+    volumes:
+      - ca-data:/etc/fis-ca:ro
+      - krb5-shared:/etc/krb5kdc/shared:ro
+    depends_on:
+      - idm1
+  ldap_exporter:
+    build: ./monitor
+    container_name: ldap_exporter
+    networks:
+      - fis-net
+    depends_on:
+      - idm1
+      - idm2
+
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:v0.47.2
+    container_name: cadvisor
+    privileged: true
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+    networks:
+      - fis-net
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "9090:9090"
+    networks:
+      - fis-net
+    depends_on:
+      - ldap_exporter
+      - cadvisor
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    networks:
+      - fis-net
+    depends_on:
+      - prometheus
+      
 networks:
   fis-net:
     driver: bridge
+
 
 volumes:
   ca-data:

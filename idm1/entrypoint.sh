@@ -95,8 +95,11 @@ if [ "${NODE_ROLE}" = "master" ]; then
         kadmin.local -q "addprinc -randkey host/idm1@${REALM}" || true
         kadmin.local -q "ktadd -k /etc/krb5.keytab host/idm1.fis.epn.ec@${REALM} host/idm1@${REALM}" || true
 
-        log "Creando usuario de prueba testuser@${REALM}..."
+        log "Creando principals de usuario..."
         kadmin.local -q "addprinc -pw ${KRB5_USER_DEFAULT_PASSWORD} testuser@${REALM}" || true
+        kadmin.local -q "addprinc -pw ${KRB5_USER_DEFAULT_PASSWORD} mgallardo@${REALM}" || true
+        kadmin.local -q "addprinc -pw ${KRB5_USER_DEFAULT_PASSWORD} malvan@${REALM}" || true
+        kadmin.local -q "addprinc -pw ${KRB5_USER_DEFAULT_PASSWORD} dnoboa@${REALM}" || true
 
         log "Creando principal de servicio ldap/idm1.fis.epn.ec@${REALM} y su keytab..."
         kadmin.local -q "addprinc -randkey ldap/idm1.fis.epn.ec@${REALM}" || true
@@ -105,6 +108,12 @@ if [ "${NODE_ROLE}" = "master" ]; then
         log "Creando alias corto ldap/idm1@${REALM}..."
         kadmin.local -q "addprinc -randkey ldap/idm1@${REALM}" || true
         kadmin.local -q "ktadd -k ${LDAP_KEYTAB} ldap/idm1@${REALM}" || true
+
+        log "Creando principal de servicio HTTP para el servidor web..."
+        kadmin.local -q "addprinc -randkey HTTP/webserver.fis.epn.ec@${REALM}" || true
+        mkdir -p "${SHARED_DIR}"
+        kadmin.local -q "ktadd -k ${SHARED_DIR}/webserver.keytab HTTP/webserver.fis.epn.ec@${REALM}" || true
+        chmod 644 "${SHARED_DIR}/webserver.keytab"
 
         log "Creando principals y pregenerando keytab para la réplica idm2..."
         mkdir -p "${SHARED_DIR}"
@@ -274,6 +283,28 @@ else
     log "SASL/GSSAPI ya configurado, se omite."
 fi
 
+# --- Habilitar backend cn=Monitor para Prometheus ---
+MONITOR_MARKER="/var/lib/ldap/.monitor_configured"
+if [ ! -f "${MONITOR_MARKER}" ]; then
+    log "Habilitando backend cn=Monitor..."
+    /usr/sbin/slapd -h "ldapi:///" -u openldap -g openldap
+    sleep 2
+
+    cat > /tmp/monitor.ldif <<EOF
+dn: olcDatabase=monitor,cn=config
+objectClass: olcDatabaseConfig
+objectClass: olcMonitorConfig
+olcDatabase: monitor
+olcAccess: to * by dn.exact="cn=admin,${LDAP_BASE_DN}" read by * none
+EOF
+    ldapadd -Y EXTERNAL -H ldapi:/// -f /tmp/monitor.ldif || true
+
+    pkill -x slapd
+    sleep 2
+    touch "${MONITOR_MARKER}"
+    log "cn=Monitor habilitado."
+fi
+
 # --- CONFIGURACION DE REPLICACION OPENLDAP ---
 
 if [ "${NODE_ROLE}" = "master" ]; then
@@ -308,9 +339,10 @@ EOF
     fi
 
     # --- Crear arbol de usuarios y mapeo GSSAPI en LDAP ---
+    # --- Crear arbol de usuarios y mapeo GSSAPI en LDAP ---
     POPULATE_MARKER="/var/lib/ldap/.populated"
     if [ ! -f "${POPULATE_MARKER}" ]; then
-        log "Creando arbol de usuarios y mapeo GSSAPI en LDAP..."
+        log "Creando arbol de usuarios, grupos y mapeo GSSAPI en LDAP..."
         /usr/sbin/slapd -h "ldapi:///" -u openldap -g openldap
         sleep 2
 
@@ -318,6 +350,65 @@ EOF
 dn: ou=people,${LDAP_BASE_DN}
 objectClass: organizationalUnit
 ou: people
+
+dn: ou=groups,${LDAP_BASE_DN}
+objectClass: organizationalUnit
+ou: groups
+
+dn: cn=profesores,ou=groups,${LDAP_BASE_DN}
+objectClass: posixGroup
+cn: profesores
+gidNumber: 5000
+memberUid: mgallardo
+memberUid: malvan
+
+dn: cn=estudiantes,ou=groups,${LDAP_BASE_DN}
+objectClass: posixGroup
+cn: estudiantes
+gidNumber: 5001
+memberUid: dnoboa
+
+dn: uid=mgallardo,ou=people,${LDAP_BASE_DN}
+objectClass: inetOrgPerson
+objectClass: posixAccount
+objectClass: shadowAccount
+cn: Maria Gallardo
+sn: Gallardo
+uid: mgallardo
+uidNumber: 10001
+gidNumber: 5000
+homeDirectory: /home/mgallardo
+loginShell: /bin/bash
+mail: mgallardo@fis.epn.ec
+userPassword: ${KRB5_USER_DEFAULT_PASSWORD}
+
+dn: uid=malvan,ou=people,${LDAP_BASE_DN}
+objectClass: inetOrgPerson
+objectClass: posixAccount
+objectClass: shadowAccount
+cn: Maria Alvan
+sn: Alvan
+uid: malvan
+uidNumber: 10002
+gidNumber: 5000
+homeDirectory: /home/malvan
+loginShell: /bin/bash
+mail: malvan@fis.epn.ec
+userPassword: ${KRB5_USER_DEFAULT_PASSWORD}
+
+dn: uid=dnoboa,ou=people,${LDAP_BASE_DN}
+objectClass: inetOrgPerson
+objectClass: posixAccount
+objectClass: shadowAccount
+cn: Diego Noboa
+sn: Noboa
+uid: dnoboa
+uidNumber: 10003
+gidNumber: 5001
+homeDirectory: /home/dnoboa
+loginShell: /bin/bash
+mail: dnoboa@fis.epn.ec
+userPassword: ${KRB5_USER_DEFAULT_PASSWORD}
 
 dn: uid=testuser,ou=people,${LDAP_BASE_DN}
 objectClass: inetOrgPerson
@@ -342,7 +433,6 @@ EOF
         touch "${POPULATE_MARKER}"
         log "Arbol de usuarios y mapeo GSSAPI configurados y verificados correctamente."
     fi
-
 else
     # NODE_ROLE = replica
     SYNCREPL_MARKER="/var/lib/ldap/.syncrepl_configured"

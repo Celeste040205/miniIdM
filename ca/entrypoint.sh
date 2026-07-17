@@ -66,6 +66,7 @@ EOF
 # 2. Generar certificados para idm1 e idm2
 generate_cert "${SERVER_FQDN:-idm1.fis.epn.ec}"
 generate_cert "idm2.fis.epn.ec"
+generate_cert "webserver.fis.epn.ec"
 
 log "Archivos en ${CA_DIR}:"
 ls -la "$CA_DIR"
