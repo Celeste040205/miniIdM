@@ -327,8 +327,8 @@ olcDbIndex: entryUUID eq
 add: olcDbIndex
 olcDbIndex: entryCSN eq
 -
-add: olcSyncRepl
-olcSyncRepl: rid=001
+add: olcSyncrepl
+olcSyncrepl: rid=001
   provider=ldaps://idm1.fis.epn.ec:636
   type=refreshAndPersist
   interval=00:00:00:10
