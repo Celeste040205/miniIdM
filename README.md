@@ -23,7 +23,6 @@ mini-idm/
 │   │                      # retraso de replicacion, estado de nodos)
 │   ├── Dockerfile
 │   └── exporter.py
-├── monitoring/
 │   └── prometheus.yml    # Configuracion de scraping (cadvisor + ldap_exporter)
 ├── lb/
 │   └── haproxy.cfg        # Balanceador LDAP/LDAPS con failover idm1 -> idm2
