@@ -1,0 +1,17 @@
+dn: olcDatabase={1}mdb,cn=config
+changetype: modify
+add: olcSyncrepl
+olcSyncrepl: rid=101
+  provider=ldap://idm1:389
+  type=refreshAndPersist
+  interval=00:00:00:10
+  searchbase="dc=fis,dc=epn,dc=ec"
+  filter="(objectClass=*)"
+  scope=sub
+  schemachecking=on
+  bindmethod=simple
+  binddn="cn=admin,dc=fis,dc=epn,dc=ec"
+  credentials="adminpassword"
+-
+add: olcUpdateRef
+olcUpdateRef: ldap://idm1:389
