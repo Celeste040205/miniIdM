@@ -17,10 +17,12 @@ RUN apt-get update && \
         ldap-utils \
         krb5-kdc \
         krb5-admin-server \
+        krb5-kpropd \
         libsasl2-modules-gssapi-mit \
         supervisor \
         openssl \
-        procps && \
+        procps \
+        dos2unix && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Directorios de trabajo / logs de supervisor
@@ -29,7 +31,7 @@ RUN mkdir -p /var/log/supervisor /etc/krb5kdc /var/lib/krb5kdc
 # Copiamos la configuracion de supervisord y el entrypoint
 COPY supervisord.conf /etc/supervisor/supervisord.conf
 COPY entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
+RUN dos2unix /entrypoint.sh && chmod +x /entrypoint.sh
 
 # Exponemos puertos clave
 # 389 LDAP, 636 LDAPS, 88 Kerberos (KDC), 464 kpasswd, 749 kadmind
